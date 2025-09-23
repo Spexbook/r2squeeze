@@ -215,7 +215,7 @@ impl ObjectsListCache {
         let objects: Vec<String> = tokio::task::spawn_blocking(move || {
             db.iter()
                 .keys()
-                .filter_map(|x| x.ok().and_then(|x| String::from_utf8(x.to_vec()).ok()))
+                .filter_map(|x| x.ok().map(|x| String::from_utf8_lossy(&*x).to_string()))
                 .collect()
         })
         .await?;
@@ -248,9 +248,6 @@ async fn get_objects_channel(
     async_channel::Receiver<String>,
 )> {
     let objects = if cache.empty().await? {
-        tracing::info!("Cache is not empty retrying cached files");
-        cache.list().await?
-    } else {
         tracing::info!("Fetching all object keys in bucket");
         let objects = storage.list_all_objects().await?;
 
@@ -259,6 +256,9 @@ async fn get_objects_channel(
         }
 
         objects
+    } else {
+        tracing::info!("Cache is not empty retrying cached files");
+        cache.list().await?
     };
 
     let (tx, rx) = async_channel::bounded::<String>(objects.len());
