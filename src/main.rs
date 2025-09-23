@@ -21,6 +21,7 @@ struct Args {
     secret: String,
 }
 
+#[derive(Clone)]
 struct ObjectStorage {
     bucket: Box<str>,
     client: s3::Client,
@@ -110,6 +111,78 @@ impl ObjectStorage {
     }
 }
 
+struct CompressObject {
+    id: usize,
+    key: String,
+    storage: ObjectStorage,
+}
+
+enum WriteStrategy {
+    File,
+    R2,
+}
+
+pub async fn create_file_with_dirs(path_str: &str) -> color_eyre::Result<tokio::fs::File> {
+    let path = std::path::Path::new(path_str);
+
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let file = tokio::fs::File::create(path).await?;
+    Ok(file)
+}
+
+impl CompressObject {
+    fn new(id: usize, key: &str, storage: ObjectStorage) -> Self {
+        Self {
+            id,
+            key: key.to_owned(),
+            storage,
+        }
+    }
+
+    async fn run(self, strategy: WriteStrategy) -> color_eyre::Result<()> {
+        let id = self.id;
+        let key = self.key.as_str();
+        tracing::info!("[worker {id}] processing {key}");
+
+        let stream = self.storage.get_object(key).await?;
+
+        let mut encoder =
+            async_compression::tokio::bufread::BrotliEncoder::new(stream.into_async_read());
+
+        match strategy {
+            WriteStrategy::File => {
+                let mut file = create_file_with_dirs(&format!("data/{}.br", self.key)).await?;
+                tokio::io::copy(&mut encoder, &mut file).await?;
+            }
+            WriteStrategy::R2 => todo!(),
+        }
+
+        tracing::info!("[worker {id}] finished processing {key}");
+
+        Ok(())
+    }
+}
+
+async fn get_objects_channel(
+    storage: &ObjectStorage,
+) -> color_eyre::Result<(
+    async_channel::Sender<String>,
+    async_channel::Receiver<String>,
+)> {
+    tracing::info!("Fetching all object keys in bucket");
+    let objects = storage.list_all_objects().await?;
+    let (tx, rx) = async_channel::bounded::<String>(objects.len());
+
+    for key in objects {
+        tx.send(key).await?;
+    }
+
+    Ok((tx, rx))
+}
+
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     let filter = std::env::var("RUST_LOG")
@@ -121,11 +194,36 @@ async fn main() -> color_eyre::Result<()> {
         .init();
 
     let storage = ObjectStorage::new().await;
+    let (tx, rx) = get_objects_channel(&storage).await?;
 
-    tracing::info!("Fetching all object keys in bucket");
-    let objects = storage.list_all_objects().await?;
+    let mut set = tokio::task::JoinSet::new();
+    for id in 0..5 {
+        let storage = ObjectStorage {
+            bucket: storage.bucket.clone(),
+            client: storage.client.clone(),
+        };
 
-    tracing::info!("Hello, world!");
+        let tx = tx.clone();
+        let rx = rx.clone();
+
+        set.spawn(async move {
+            while let Ok(key) = rx.recv().await {
+                let storage = storage.clone();
+                match CompressObject::new(id, key.as_str(), storage)
+                    .run(WriteStrategy::File)
+                    .await
+                {
+                    Ok(()) => {}
+                    Err(err) => {
+                        tracing::error!("[worker {id}] failed processing {key}: {err}");
+                        let _ = tx.send(key).await;
+                    }
+                }
+            }
+        });
+    }
+
+    set.join_all().await;
 
     Ok(())
 }

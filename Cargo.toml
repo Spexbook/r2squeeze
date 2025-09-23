@@ -5,6 +5,8 @@ edition = "2024"
 repository = "https://github.com/frectonz/r2squeeze"
 
 [dependencies]
+async-channel = "2.5.0"
+async-compression = { version = "0.4.30", features = ["tokio", "brotli"] }
 aws-config = "1.8.6"
 aws-sdk-s3 = "1.106.0"
 clap = { version = "4.5.48", features = ["derive"] }
