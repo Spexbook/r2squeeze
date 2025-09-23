@@ -19,7 +19,10 @@
       forAllSystems =
         fn:
         let
-          systems = [ "x86_64-linux" "aarch64-darwin" ];
+          systems = [
+            "x86_64-linux"
+            "aarch64-darwin"
+          ];
           overlays = [ (import rust-overlay) ];
         in
         nixpkgs.lib.genAttrs systems (
@@ -43,7 +46,7 @@
         };
       });
 
-            formatter = forAllSystems (
+      formatter = forAllSystems (
         pkgs:
         pkgs.treefmt.withConfig {
           runtimeInputs = [ pkgs.nixfmt-rfc-style ];
