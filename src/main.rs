@@ -94,6 +94,20 @@ impl ObjectStorage {
 
         Ok(keys)
     }
+
+    pub async fn get_object(&self, key: &str) -> color_eyre::Result<s3::primitives::ByteStream> {
+        let resp = self
+            .client
+            .get_object()
+            .bucket(self.bucket.as_ref())
+            .key(key)
+            .send()
+            .await?;
+
+        let stream = resp.body;
+
+        Ok(stream)
+    }
 }
 
 #[tokio::main]
