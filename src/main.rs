@@ -191,14 +191,76 @@ impl CompressObject {
     }
 }
 
+#[derive(Clone)]
+struct ObjectsListCache {
+    db: sled::Db,
+}
+
+impl ObjectsListCache {
+    async fn new() -> color_eyre::Result<Self> {
+        Ok(Self {
+            db: sled::open("r2squeeze.sled")?,
+        })
+    }
+
+    async fn empty(&self) -> color_eyre::Result<bool> {
+        let db = self.db.clone();
+        let length = tokio::task::spawn_blocking(move || db.len()).await?;
+
+        Ok(length == 0)
+    }
+
+    async fn list(&self) -> color_eyre::Result<Vec<String>> {
+        let db = self.db.clone();
+        let objects: Vec<String> = tokio::task::spawn_blocking(move || {
+            db.iter()
+                .keys()
+                .filter_map(|x| x.ok().and_then(|x| String::from_utf8(x.to_vec()).ok()))
+                .collect()
+        })
+        .await?;
+
+        Ok(objects)
+    }
+
+    async fn insert(&self, key: &str) -> color_eyre::Result<()> {
+        let db = self.db.clone();
+        let key = key.to_owned();
+        let _ = tokio::task::spawn_blocking(move || db.insert(key, b"")).await??;
+
+        Ok(())
+    }
+
+    async fn remove(&self, key: &str) -> color_eyre::Result<()> {
+        let db = self.db.clone();
+        let key = key.to_owned();
+        let _ = tokio::task::spawn_blocking(move || db.remove(key)).await??;
+
+        Ok(())
+    }
+}
+
 async fn get_objects_channel(
     storage: &ObjectStorage,
+    cache: &ObjectsListCache,
 ) -> color_eyre::Result<(
     async_channel::Sender<String>,
     async_channel::Receiver<String>,
 )> {
-    tracing::info!("Fetching all object keys in bucket");
-    let objects = storage.list_all_objects().await?;
+    let objects = if cache.empty().await? {
+        tracing::info!("Cache is not empty retrying cached files");
+        cache.list().await?
+    } else {
+        tracing::info!("Fetching all object keys in bucket");
+        let objects = storage.list_all_objects().await?;
+
+        for key in objects.iter() {
+            cache.insert(key).await?
+        }
+
+        objects
+    };
+
     let (tx, rx) = async_channel::bounded::<String>(objects.len());
 
     for key in objects {
@@ -220,21 +282,21 @@ async fn main() -> color_eyre::Result<()> {
 
     let args = Args::parse();
     let storage = ObjectStorage::new(&args).await;
-    let (tx, rx) = get_objects_channel(&storage).await?;
+    let cache = ObjectsListCache::new().await?;
+
+    let (tx, rx) = get_objects_channel(&storage, &cache).await?;
 
     let mut set = tokio::task::JoinSet::new();
     for id in 0..args.jobs {
-        let storage = ObjectStorage {
-            bucket: storage.bucket.clone(),
-            client: storage.client.clone(),
-        };
-
+        let storage = storage.clone();
+        let cache = cache.clone();
         let tx = tx.clone();
         let rx = rx.clone();
 
         set.spawn(async move {
             while let Ok(key) = rx.recv().await {
                 let storage = storage.clone();
+                let cache = cache.clone();
                 match CompressObject::new(id, key.as_str(), storage)
                     .run(WriteStrategy::File)
                     .await
@@ -242,7 +304,12 @@ async fn main() -> color_eyre::Result<()> {
                     Ok(()) => {}
                     Err(err) => {
                         tracing::error!("[worker {id}] failed to compress {key}: {err}");
-                        let _ = tx.send(key).await;
+                        let res = cache.remove(&key).await;
+                        tracing::info!("[worker {id}] remove from cache result {key}: {res:?}");
+                        let _ = tx.send(key.to_owned()).await;
+                        tracing::info!(
+                            "[worker {id}] send retry to channel result: {key}: {res:?}"
+                        );
                     }
                 }
             }
