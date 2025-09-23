@@ -134,6 +134,46 @@ impl ObjectStorage {
 
         Ok(stream)
     }
+
+    pub async fn put_object(
+        &self,
+        key: &str,
+        stream: s3::primitives::ByteStream,
+    ) -> color_eyre::Result<()> {
+        self.client
+            .put_object()
+            .bucket(self.bucket.as_ref())
+            .key(key)
+            .body(stream)
+            .send()
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn exists(&self, key: &str) -> color_eyre::Result<bool> {
+        let resp = self
+            .client
+            .head_object()
+            .bucket(self.bucket.as_ref())
+            .key(key)
+            .send()
+            .await;
+
+        let not_found = resp.is_err_and(|e| e.into_service_error().is_not_found());
+        Ok(!not_found)
+    }
+
+    pub async fn remove(&self, key: &str) -> color_eyre::Result<()> {
+        self.client
+            .delete_object()
+            .bucket(self.bucket.as_ref())
+            .key(key)
+            .send()
+            .await?;
+
+        Ok(())
+    }
 }
 
 struct CompressObject {
@@ -167,6 +207,21 @@ impl CompressObject {
         Ok(file)
     }
 
+    pub async fn create_object(
+        &self,
+        stream: s3::primitives::ByteStream,
+    ) -> color_eyre::Result<()> {
+        let key = format!("{}.br", self.key);
+
+        if self.storage.exists(&key).await? {
+            self.storage.remove(&key).await?
+        }
+
+        self.storage.put_object(&key, stream).await?;
+
+        Ok(())
+    }
+
     async fn run(self, strategy: WriteStrategy) -> color_eyre::Result<()> {
         let id = self.id;
         let key = self.key.as_str();
@@ -182,7 +237,12 @@ impl CompressObject {
                 let mut file = self.create_file().await?;
                 tokio::io::copy(&mut encoder, &mut file).await?;
             }
-            WriteStrategy::R2 => todo!(),
+            WriteStrategy::R2 => {
+                let mut output = Vec::new();
+                tokio::io::copy(&mut encoder, &mut output).await?;
+                let stream = s3::primitives::ByteStream::from(output);
+                self.create_object(stream).await?
+            }
         }
 
         tracing::info!("[worker {id}] finished compressing {key}");
