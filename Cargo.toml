@@ -2,5 +2,11 @@
 name = "r2squeeze"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/frectonz/r2squeeze"
 
 [dependencies]
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

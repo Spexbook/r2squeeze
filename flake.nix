@@ -39,6 +39,7 @@
         default = pkgs.mkShell {
           buildInputs = [
             pkgs.bacon
+            pkgs.cargo-dist
             pkgs.cargo-expand
             pkgs.rust-analyzer
             pkgs.rust-bin.stable.latest.default
