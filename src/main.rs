@@ -1,5 +1,5 @@
 #[tokio::main]
-async fn main() {
+async fn main() -> color_eyre::Result<()> {
     let filter = std::env::var("RUST_LOG")
         .unwrap_or_else(|_| "tracing=info,warp=debug,r2squeeze=debug".to_owned());
 
@@ -9,4 +9,6 @@ async fn main() {
         .init();
 
     tracing::info!("Hello, world!");
+
+    Ok(())
 }
