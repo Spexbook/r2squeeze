@@ -1,28 +1,51 @@
 use aws_sdk_s3 as s3;
 use clap::Parser;
 
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+/// Compresses all objects in a given R2 bucket using Brotli.
+#[derive(Parser)]
+#[command(version, about)]
 struct Args {
     /// The R2 bucket to connect to.
-    #[arg(short, long)]
+    #[arg(long)]
     bucket: String,
 
     /// The R2 account ID.
-    #[arg(short, long)]
+    #[arg(long)]
     account_id: String,
 
     /// The R2 access key ID.
-    #[arg(short, long)]
+    #[arg(long)]
     key_id: String,
 
     /// The R2 access key secret.
-    #[arg(short, long)]
+    #[arg(long)]
     secret: String,
 
+    /// The strategy to when writing compressed files.
+    #[arg(long)]
+    strategy: WriteStrategy,
+
     /// The number of jobs to spawn.
-    #[arg(short, long)]
+    #[arg(long)]
     jobs: usize,
+}
+
+#[derive(Clone)]
+enum WriteStrategy {
+    File,
+    R2,
+}
+
+impl std::str::FromStr for WriteStrategy {
+    type Err = color_eyre::Report;
+
+    fn from_str(s: &str) -> color_eyre::Result<Self> {
+        match s {
+            "file" => Ok(WriteStrategy::File),
+            "r2" => Ok(WriteStrategy::R2),
+            _ => color_eyre::eyre::bail!("unknown strategy type: {s}"),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -119,22 +142,6 @@ struct CompressObject {
     storage: ObjectStorage,
 }
 
-enum WriteStrategy {
-    File,
-    R2,
-}
-
-pub async fn create_file_with_dirs(path_str: &str) -> color_eyre::Result<tokio::fs::File> {
-    let path = std::path::Path::new(path_str);
-
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-
-    let file = tokio::fs::File::create(path).await?;
-    Ok(file)
-}
-
 impl CompressObject {
     fn new(id: usize, key: &str, storage: ObjectStorage) -> Self {
         Self {
@@ -142,6 +149,18 @@ impl CompressObject {
             key: key.to_owned(),
             storage,
         }
+    }
+
+    pub async fn create_file(&self) -> color_eyre::Result<tokio::fs::File> {
+        let path = format!("data/{}.br", self.key);
+        let path = std::path::Path::new(&path);
+
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        let file = tokio::fs::File::create(path).await?;
+        Ok(file)
     }
 
     async fn run(self, strategy: WriteStrategy) -> color_eyre::Result<()> {
@@ -156,7 +175,7 @@ impl CompressObject {
 
         match strategy {
             WriteStrategy::File => {
-                let mut file = create_file_with_dirs(&format!("data/{}.br", self.key)).await?;
+                let mut file = self.create_file().await?;
                 tokio::io::copy(&mut encoder, &mut file).await?;
             }
             WriteStrategy::R2 => todo!(),
