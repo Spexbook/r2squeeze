@@ -160,8 +160,11 @@ impl ObjectStorage {
             .send()
             .await;
 
-        let not_found = resp.is_err_and(|e| e.into_service_error().is_not_found());
-        Ok(!not_found)
+        match resp {
+            Ok(_) => Ok(true),
+            Err(err) if err.as_service_error().is_some_and(|x| x.is_not_found()) => Ok(false),
+            Err(err) => Err(err.into()),
+        }
     }
 
     pub async fn remove(&self, key: &str) -> color_eyre::Result<()> {
