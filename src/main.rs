@@ -19,6 +19,10 @@ struct Args {
     /// The R2 access key secret.
     #[arg(short, long)]
     secret: String,
+
+    /// The number of jobs to spawn.
+    #[arg(short, long)]
+    jobs: usize,
 }
 
 #[derive(Clone)]
@@ -28,17 +32,15 @@ struct ObjectStorage {
 }
 
 impl ObjectStorage {
-    async fn new() -> Self {
-        let args = Args::parse();
-
+    async fn new(args: &Args) -> Self {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .endpoint_url(format!(
                 "https://{}.r2.cloudflarestorage.com",
                 args.account_id
             ))
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                args.key_id,
-                args.secret,
+                args.key_id.to_owned(),
+                args.secret.to_owned(),
                 None,
                 None,
                 "R2",
@@ -48,7 +50,7 @@ impl ObjectStorage {
             .await;
 
         Self {
-            bucket: args.bucket.into(),
+            bucket: args.bucket.to_owned().into_boxed_str(),
             client: s3::Client::new(&config),
         }
     }
@@ -145,7 +147,7 @@ impl CompressObject {
     async fn run(self, strategy: WriteStrategy) -> color_eyre::Result<()> {
         let id = self.id;
         let key = self.key.as_str();
-        tracing::info!("[worker {id}] processing {key}");
+        tracing::info!("[worker {id}] compressing {key}");
 
         let stream = self.storage.get_object(key).await?;
 
@@ -160,7 +162,7 @@ impl CompressObject {
             WriteStrategy::R2 => todo!(),
         }
 
-        tracing::info!("[worker {id}] finished processing {key}");
+        tracing::info!("[worker {id}] finished compressing {key}");
 
         Ok(())
     }
@@ -193,11 +195,12 @@ async fn main() -> color_eyre::Result<()> {
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .init();
 
-    let storage = ObjectStorage::new().await;
+    let args = Args::parse();
+    let storage = ObjectStorage::new(&args).await;
     let (tx, rx) = get_objects_channel(&storage).await?;
 
     let mut set = tokio::task::JoinSet::new();
-    for id in 0..5 {
+    for id in 0..args.jobs {
         let storage = ObjectStorage {
             bucket: storage.bucket.clone(),
             client: storage.client.clone(),
@@ -215,7 +218,7 @@ async fn main() -> color_eyre::Result<()> {
                 {
                     Ok(()) => {}
                     Err(err) => {
-                        tracing::error!("[worker {id}] failed processing {key}: {err}");
+                        tracing::error!("[worker {id}] failed to compress {key}: {err}");
                         let _ = tx.send(key).await;
                     }
                 }
