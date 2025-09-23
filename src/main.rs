@@ -217,6 +217,7 @@ impl CompressObject {
         let key = format!("{}.br", self.key);
 
         if self.storage.exists(&key).await? {
+            tracing::info!("[worker {id}] deleting {key} from R2");
             self.storage.remove(&key).await?
         }
 
