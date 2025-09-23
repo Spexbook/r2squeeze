@@ -287,7 +287,9 @@ async fn main() -> color_eyre::Result<()> {
     let (tx, rx) = get_objects_channel(&storage, &cache).await?;
 
     let mut set = tokio::task::JoinSet::new();
+    let strategy = args.strategy.clone();
     for id in 0..args.jobs {
+        let strategy = strategy.clone();
         let storage = storage.clone();
         let cache = cache.clone();
         let tx = tx.clone();
@@ -297,8 +299,9 @@ async fn main() -> color_eyre::Result<()> {
             while let Ok(key) = rx.recv().await {
                 let storage = storage.clone();
                 let cache = cache.clone();
+                let strategy = strategy.clone();
                 match CompressObject::new(id, key.as_str(), storage)
-                    .run(WriteStrategy::File)
+                    .run(strategy)
                     .await
                 {
                     Ok(()) => {}
