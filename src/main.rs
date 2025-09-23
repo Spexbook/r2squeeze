@@ -159,6 +159,10 @@ impl CompressObject {
             tokio::fs::create_dir_all(parent).await?;
         }
 
+        if tokio::fs::metadata(path).await.is_ok() {
+            tokio::fs::remove_file(path).await?;
+        }
+
         let file = tokio::fs::File::create(path).await?;
         Ok(file)
     }
