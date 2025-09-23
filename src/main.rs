@@ -214,6 +214,7 @@ impl CompressObject {
         &self,
         stream: s3::primitives::ByteStream,
     ) -> color_eyre::Result<()> {
+        let id = self.id;
         let key = format!("{}.br", self.key);
 
         if self.storage.exists(&key).await? {
