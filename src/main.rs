@@ -51,6 +51,49 @@ impl ObjectStorage {
             client: s3::Client::new(&config),
         }
     }
+
+    pub async fn list_all_objects(&self) -> color_eyre::Result<Vec<String>> {
+        let mut keys = Vec::new();
+        let mut continuation_token = None;
+
+        let pb = indicatif::ProgressBar::new_spinner();
+        pb.set_style(
+            indicatif::ProgressStyle::with_template(
+                "{spinner:.green} [{elapsed}] {pos} objects found",
+            )
+            .unwrap(),
+        );
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+        loop {
+            let mut req = self.client.list_objects_v2().bucket(self.bucket.as_ref());
+
+            if let Some(token) = &continuation_token {
+                req = req.continuation_token(token);
+            }
+
+            let resp = req.send().await?;
+
+            if let Some(objects) = resp.contents {
+                for obj in objects {
+                    if let Some(key) = obj.key {
+                        keys.push(key);
+                        pb.inc(1);
+                    }
+                }
+            }
+
+            if resp.is_truncated == Some(true) {
+                continuation_token = resp.next_continuation_token;
+            } else {
+                break;
+            }
+        }
+
+        pb.finish_with_message(format!("Done. Found {} objects.", keys.len()));
+
+        Ok(keys)
+    }
 }
 
 #[tokio::main]
@@ -64,6 +107,9 @@ async fn main() -> color_eyre::Result<()> {
         .init();
 
     let storage = ObjectStorage::new().await;
+
+    tracing::info!("Fetching all object keys in bucket");
+    let objects = storage.list_all_objects().await?;
 
     tracing::info!("Hello, world!");
 
