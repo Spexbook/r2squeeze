@@ -5,6 +5,7 @@ edition = "2024"
 repository = "https://github.com/frectonz/r2squeeze"
 
 [dependencies]
+tokio = { version = "1.47.1", features = ["full"] }
 
 # The profile that 'dist' will build with
 [profile.dist]
