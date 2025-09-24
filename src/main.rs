@@ -1,4 +1,4 @@
-use aws_sdk_s3 as s3;
+use aws_sdk_s3::{self as s3};
 use clap::Parser;
 
 /// Compresses all objects in a given R2 bucket using Brotli.
@@ -389,11 +389,11 @@ async fn main() -> color_eyre::Result<()> {
             tracing::warn!("Received Ctrl+C, shutting down gracefully…");
             drop(rx);
             drop(tx);
+        },
+        _ = set.join_all() => {
+            tracing::info!("All workers finished");
         }
     }
-
-    set.shutdown().await;
-    tracing::info!("All workers finished");
 
     Ok(())
 }
