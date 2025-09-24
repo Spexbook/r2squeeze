@@ -353,7 +353,7 @@ async fn main() -> color_eyre::Result<()> {
 
         set.spawn(async move {
             while let Ok(Ok(key)) =
-                tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv()).await
+                tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await
             {
                 let storage = storage.clone();
                 let cache = cache.clone();
