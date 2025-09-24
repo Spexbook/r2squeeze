@@ -352,7 +352,9 @@ async fn main() -> color_eyre::Result<()> {
         let rx = rx.clone();
 
         set.spawn(async move {
-            while let Ok(key) = rx.recv().await {
+            while let Ok(Ok(key)) =
+                tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv()).await
+            {
                 let storage = storage.clone();
                 let cache = cache.clone();
                 let strategy = strategy.clone();
@@ -375,7 +377,23 @@ async fn main() -> color_eyre::Result<()> {
         });
     }
 
-    set.join_all().await;
+    let shutdown = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+        tracing::warn!("Received Ctrl+C, shutting down gracefully…");
+    };
+
+    tokio::select! {
+        _ = shutdown => {
+            tracing::warn!("Received Ctrl+C, shutting down gracefully…");
+            drop(rx);
+            drop(tx);
+        }
+    }
+
+    set.shutdown().await;
+    tracing::info!("All workers finished");
 
     Ok(())
 }
