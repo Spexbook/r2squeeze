@@ -102,7 +102,9 @@ impl ObjectStorage {
 
             if let Some(objects) = resp.contents {
                 for obj in objects {
-                    if let Some(key) = obj.key {
+                    if let Some(key) = obj.key
+                        && !key.ends_with(".br")
+                    {
                         keys.push(key);
                         pb.inc(1);
                     }
