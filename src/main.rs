@@ -168,17 +168,6 @@ impl ObjectStorage {
             Err(err) => Err(err.into()),
         }
     }
-
-    pub async fn remove(&self, key: &str) -> color_eyre::Result<()> {
-        self.client
-            .delete_object()
-            .bucket(self.bucket.as_ref())
-            .key(key)
-            .send()
-            .await?;
-
-        Ok(())
-    }
 }
 
 struct CompressObject {
@@ -216,14 +205,7 @@ impl CompressObject {
         &self,
         stream: s3::primitives::ByteStream,
     ) -> color_eyre::Result<()> {
-        let id = self.id;
         let key = format!("{}.br", self.key);
-
-        if self.storage.exists(&key).await? {
-            tracing::info!("[worker {id}] deleting {key} from R2");
-            self.storage.remove(&key).await?
-        }
-
         self.storage.put_object(&key, stream).await?;
 
         Ok(())
@@ -232,6 +214,13 @@ impl CompressObject {
     async fn run(self, strategy: WriteStrategy) -> color_eyre::Result<()> {
         let id = self.id;
         let key = self.key.as_str();
+        let brotli_key = format!("{key}.br");
+
+        if self.storage.exists(&brotli_key).await? {
+            tracing::info!("[worker {id}] skipping {key}, already compressed");
+            return Ok(());
+        }
+
         tracing::info!("[worker {id}] compressing {key}");
 
         let stream = self.storage.get_object(key).await?;
@@ -282,7 +271,7 @@ impl ObjectsListCache {
         let objects: Vec<String> = tokio::task::spawn_blocking(move || {
             db.iter()
                 .keys()
-                .filter_map(|x| x.ok().map(|x| String::from_utf8_lossy(&*x).to_string()))
+                .filter_map(|x| x.ok().map(|x| String::from_utf8_lossy(&x).to_string()))
                 .collect()
         })
         .await?;
