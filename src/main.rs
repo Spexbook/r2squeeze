@@ -52,6 +52,7 @@ impl std::str::FromStr for WriteStrategy {
 struct ObjectStorage {
     bucket: Box<str>,
     client: s3::Client,
+    compressed: std::sync::Arc<tokio::sync::RwLock<Option<std::collections::HashSet<String>>>>,
 }
 
 impl ObjectStorage {
@@ -75,11 +76,13 @@ impl ObjectStorage {
         Self {
             bucket: args.bucket.to_owned().into_boxed_str(),
             client: s3::Client::new(&config),
+            compressed: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
     pub async fn list_all_objects(&self) -> color_eyre::Result<Vec<String>> {
-        let mut keys = Vec::new();
+        let mut uncompressed = Vec::new();
+        let mut compressed = std::collections::HashSet::new();
         let mut continuation_token = None;
 
         let pb = indicatif::ProgressBar::new_spinner();
@@ -102,10 +105,12 @@ impl ObjectStorage {
 
             if let Some(objects) = resp.contents {
                 for obj in objects {
-                    if let Some(key) = obj.key
-                        && !key.ends_with(".br")
-                    {
-                        keys.push(key);
+                    if let Some(key) = obj.key {
+                        if key.ends_with(".br") {
+                            compressed.insert(key);
+                        } else {
+                            uncompressed.push(key);
+                        }
                         pb.inc(1);
                     }
                 }
@@ -118,9 +123,14 @@ impl ObjectStorage {
             }
         }
 
-        pb.finish_with_message(format!("Done. Found {} objects.", keys.len()));
+        {
+            let mut guard = self.compressed.write().await;
+            *guard = Some(compressed);
+        }
 
-        Ok(keys)
+        pb.finish_with_message(format!("Done. Found {} objects.", uncompressed.len()));
+
+        Ok(uncompressed)
     }
 
     pub async fn get_object(&self, key: &str) -> color_eyre::Result<s3::primitives::ByteStream> {
@@ -154,6 +164,10 @@ impl ObjectStorage {
     }
 
     pub async fn exists(&self, key: &str) -> color_eyre::Result<bool> {
+        if let Some(set) = self.compressed.read().await.as_ref() {
+            return Ok(set.contains(key));
+        }
+
         let resp = self
             .client
             .head_object()
