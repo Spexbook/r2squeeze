@@ -1,8 +1,8 @@
 [package]
 name = "r2squeeze"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
-repository = "https://github.com/frectonz/r2squeeze"
+repository = "https://github.com/Spexbook/r2squeeze"
 
 [dependencies]
 async-channel = "2.5.0"
