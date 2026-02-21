@@ -6,27 +6,27 @@ use clap::Parser;
 #[command(version, about)]
 struct Args {
     /// The R2 bucket to connect to.
-    #[arg(long)]
+    #[arg(long, env = "R2SQUEEZE_BUCKET")]
     bucket: String,
 
     /// The R2 account ID.
-    #[arg(long)]
+    #[arg(long, env = "R2SQUEEZE_ACCOUNT_ID")]
     account_id: String,
 
     /// The R2 access key ID.
-    #[arg(long)]
+    #[arg(long, env = "R2SQUEEZE_KEY_ID")]
     key_id: String,
 
     /// The R2 access key secret.
-    #[arg(long)]
+    #[arg(long, env = "R2SQUEEZE_SECRET")]
     secret: String,
 
     /// The strategy to when writing compressed files.
-    #[arg(long)]
+    #[arg(long, env = "R2SQUEEZE_STRATEGY")]
     strategy: WriteStrategy,
 
     /// The number of jobs to spawn.
-    #[arg(long)]
+    #[arg(long, env = "R2SQUEEZE_JOBS")]
     jobs: usize,
 }
 
